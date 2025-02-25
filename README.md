@@ -1,5 +1,29 @@
 # Microservices-API-in-Go
 
+# Building Microservices API in Go
+
+This repository contains the source code for **Building Microservices API in Go**, covering advanced development practices such as authentication, authorization, JWT tokens, and refresh tokens. It also includes techniques for writing reliable code through unit testing and essential concepts such as logging, error handling, and modularization.
+
+With this project, you will be able to develop secure and scalable web applications using Go, following best practices for code organization and reusability.
+
+## 📌 Features Covered
+
+- Implementation of authentication and authorization, including role-based access control (RBAC)
+- Generation and management of JWT tokens for secure authentication
+- Unit testing strategies, including state-based testing, route and service testing, as well as creating and using mocks and stubs
+- Structured logging and efficient error handling
+- Code modularization by extracting reusable packages
+- Integration of modules into a banking API for authentication and transaction management
+- Use of Claims for JWT token parsing and implementation of refresh tokens for continuous and secure access
+
+## 🎯 Target Audience
+
+This project is ideal for developers looking to enhance their skills in Go and REST-based microservices. It is also useful for software professionals who want to learn about building scalable and secure APIs.
+
+## 🚀 How to Use This Repository
+
+Clone the repository and explore the files to understand the implementations and best practices used. If you want to contribute or extend functionalities, feel free to open issues or pull requests.
+
 
 ## Using `reflex` for Live Reloading
 
