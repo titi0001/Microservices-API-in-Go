@@ -40,6 +40,20 @@ func (d *CustomerRepositoryDb) Close() {
 	}
 }
 
+func (d CustomerRepositoryDb) ById(id string) (*Customer, error) {
+	customerSql := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers WHERE customer_id = ?"
+	row := d.client.QueryRow(customerSql, id)
+
+	var c Customer
+
+	err := row.Scan(&c.Id, &c.Name, &c.DateOfBirth, &c.City, &c.Zipcode, &c.Status)
+	if err != nil {
+		log.Println("Error getting customer:", err)
+		return nil, err
+	}
+	return &c, nil
+}
+
 func NewCustomerRepositoryDb() CustomerRepositoryDb {
 	user := os.Getenv("MYSQL_USER")
 	password := os.Getenv("MYSQL_PASSWORD")
