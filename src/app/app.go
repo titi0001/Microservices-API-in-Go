@@ -2,11 +2,11 @@ package app
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"log"
 
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
@@ -21,13 +21,13 @@ func Start() {
 		log.Fatal("Error loading .env file")
 	}
 
-
 	router := mux.NewRouter()
 	repo := domain.NewCustomerRepositoryDb()
 
 	ch := CustomerHandler{service.NewCustomerService(repo)}
 
 	router.HandleFunc("/customers", ch.getAllCustomers).Methods(http.MethodGet)
+	router.HandleFunc("/customers/{customer_id:[0-9]+}", ch.GetCustomer).Methods(http.MethodGet)
 
 	server := &http.Server{
 		Addr:    "localhost:8000",
