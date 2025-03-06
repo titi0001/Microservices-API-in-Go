@@ -3,8 +3,10 @@ package app
 import (
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"net/http"
 
+	"github.com/gorilla/mux"
 	"github.com/titi0001/Microservices-API-in-Go/src/service"
 )
 
@@ -40,4 +42,21 @@ func (ch *CustomerHandler) getAllCustomers(w http.ResponseWriter, r *http.Reques
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
 	}
+}
+
+func (ch *CustomerHandler) GetCustomer(w http.ResponseWriter, r *http.Request) {
+	 vars := mux.Vars(r)
+	 id := vars["customer_id"]
+
+	 customer, err := ch.service.GetCustomer(id)
+	 if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		 fmt.Fprint(w, err.Error())	 
+	 } else {
+		w.Header().Add("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(customer); err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+	 }
+
 }
