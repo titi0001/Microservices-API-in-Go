@@ -21,11 +21,7 @@ func (ch *CustomerHandler) getAllCustomers(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err != nil {
-		writeResponse(w, err.Code, err.AsMessage())
-	} else {
-		writeResponse(w, http.StatusOK, customers)
-	}
+	writeResponse(w, http.StatusOK, customers)
 }
 
 func (ch *CustomerHandler) GetCustomer(w http.ResponseWriter, r *http.Request) {
