@@ -3,17 +3,19 @@ package domain
 import (
 	"database/sql"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
 	"log"
 	"os"
 	"time"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/titi0001/Microservices-API-in-Go/src/errs"
 )
 
 type CustomerRepositoryDb struct {
 	client *sql.DB
 }
 
-func (d CustomerRepositoryDb) FindAll() ([]Customer, error) {
+func (d CustomerRepositoryDb) FindAll() ([]Customer, *errs.AppError) {
 
 	rows, err := d.client.Query("SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers")
 	if err != nil {
@@ -40,7 +42,7 @@ func (d *CustomerRepositoryDb) Close() {
 	}
 }
 
-func (d CustomerRepositoryDb) ById(id string) (*Customer, error) {
+func (d CustomerRepositoryDb) ById(id string) (*Customer, *errs.AppError) {
 	customerSql := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers WHERE customer_id = ?"
 	row := d.client.QueryRow(customerSql, id)
 
@@ -48,8 +50,11 @@ func (d CustomerRepositoryDb) ById(id string) (*Customer, error) {
 
 	err := row.Scan(&c.Id, &c.Name, &c.DateOfBirth, &c.City, &c.Zipcode, &c.Status)
 	if err != nil {
-		log.Println("Error getting customer:", err)
-		return nil, err
+		if err == sql.ErrNoRows {
+			return nil, errs.NewNotFoundError("Customer not found")
+		}
+		log.Println("Error getting customer:", err.Error())
+		return nil, errs.NewUnexpectedError("Unexpected database error")
 	}
 	return &c, nil
 }
