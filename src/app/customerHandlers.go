@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"net/http"
 
@@ -18,23 +17,14 @@ func (ch *CustomerHandler) getAllCustomers(w http.ResponseWriter, r *http.Reques
 
 	customers, err := ch.service.GetAllCustomer()
 	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		http.Error(w, err.Message, err.Code)
 		return
 	}
 
-	if r.Header.Get("Content-Type") == "application/xml" {
-		w.Header().Add("Content-Type", "application/xml")
-		err := xml.NewEncoder(w).Encode(customers)
-		if err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		}
+	if err != nil {
+		writeResponse(w, err.Code, err.AsMessage())
 	} else {
-		w.Header().Add("Content-Type", "application/json")
-		err := json.NewEncoder(w).Encode(customers)
-
-		if err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		}
+		writeResponse(w, http.StatusOK, customers)
 	}
 }
 
