@@ -22,9 +22,8 @@ type CustomerHandler struct {
 
 func (ch *CustomerHandler) getAllCustomers(w http.ResponseWriter, r *http.Request) {
 
-
-	customers, error := ch.service.GetAllCustomer()
-	if error != nil {
+	customers, err := ch.service.GetAllCustomer()
+	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -45,18 +44,18 @@ func (ch *CustomerHandler) getAllCustomers(w http.ResponseWriter, r *http.Reques
 }
 
 func (ch *CustomerHandler) GetCustomer(w http.ResponseWriter, r *http.Request) {
-	 vars := mux.Vars(r)
-	 id := vars["customer_id"]
+	vars := mux.Vars(r)
+	id := vars["customer_id"]
 
-	 customer, err := ch.service.GetCustomer(id)
-	 if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		 fmt.Fprint(w, err.Error())	 
-	 } else {
+	customer, errs := ch.service.GetCustomer(id)
+	if errs != nil {
+		w.WriteHeader(errs.Code)
+		fmt.Fprint(w, errs.Message)
+	} else {
 		w.Header().Add("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(customer); err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			fmt.Fprint(w, "Error encoding response")
 		}
-	 }
+	}
 
 }
