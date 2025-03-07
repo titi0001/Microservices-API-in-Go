@@ -10,12 +10,6 @@ import (
 	"github.com/titi0001/Microservices-API-in-Go/src/service"
 )
 
-type Customer struct {
-	Name    string `json:"full_name" xml:"name"`
-	City    string `json:"city" xml:"city"`
-	Zipcode string `json:"zip_code" xml:"zipcode"`
-}
-
 type CustomerHandler struct {
 	service service.CustomerService
 }
@@ -37,6 +31,7 @@ func (ch *CustomerHandler) getAllCustomers(w http.ResponseWriter, r *http.Reques
 	} else {
 		w.Header().Add("Content-Type", "application/json")
 		err := json.NewEncoder(w).Encode(customers)
+
 		if err != nil {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
@@ -47,15 +42,18 @@ func (ch *CustomerHandler) GetCustomer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["customer_id"]
 
-	customer, errs := ch.service.GetCustomer(id)
-	if errs != nil {
-		w.WriteHeader(errs.Code)
-		fmt.Fprint(w, errs.Message)
+	customer, err := ch.service.GetCustomer(id)
+	if err != nil {
+		writeResponse(w, err.Code, err.AsMessage())
 	} else {
-		w.Header().Add("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(customer); err != nil {
-			fmt.Fprint(w, "Error encoding response")
-		}
+		writeResponse(w, http.StatusOK, customer)
 	}
+}
 
+func writeResponse(w http.ResponseWriter, code int, data any) {
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		fmt.Printf("failed to encode response: %v\n", err)
+	}
 }
