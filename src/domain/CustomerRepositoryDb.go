@@ -9,26 +9,38 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/titi0001/Microservices-API-in-Go/src/errs"
+	"github.com/titi0001/Microservices-API-in-Go/src/logger"
 )
 
 type CustomerRepositoryDb struct {
 	client *sql.DB
 }
 
-func (d CustomerRepositoryDb) FindAll() ([]Customer, *errs.AppError) {
+func (d CustomerRepositoryDb) FindAll(status string) ([]Customer, *errs.AppError) {
+	var rows *sql.Rows
+	var err error
 
-	rows, err := d.client.Query("SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers")
+	if status == "" {
+		FindAllSql := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers"
+		rows, err = d.client.Query(FindAllSql)
+	} else {
+		FindAllSql := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers WHERE status = ?"
+		rows, err = d.client.Query(FindAllSql, status)
+	}
+
 	if err != nil {
-		panic(err.Error())
+		logger.Error("Error while querying customer table" + err.Error())
+		return nil, errs.NewUnexpectedError("Unexpected database error")
 	}
 	defer rows.Close()
 
 	customers := make([]Customer, 0)
 	for rows.Next() {
 		var c Customer
-		err = rows.Scan(&c.Id, &c.Name, &c.DateOfBirth, &c.City, &c.Zipcode, &c.Status)
+		err := rows.Scan(&c.Id, &c.Name, &c.DateOfBirth, &c.City, &c.Zipcode, &c.Status)
 		if err != nil {
-			panic(err.Error())
+			logger.Error("Error while scanning customer" + err.Error())
+			return nil, errs.NewUnexpectedError("Unexpected database error")
 		}
 		customers = append(customers, c)
 	}
