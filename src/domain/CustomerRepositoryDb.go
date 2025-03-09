@@ -20,17 +20,16 @@ func (d CustomerRepositoryDb) FindAll(status string) ([]Customer, *errs.AppError
 	var rows *sql.Rows
 	var err error
 
-	if status == "" {
-		FindAllSql := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers"
-		rows, err = d.client.Query(FindAllSql)
-	} else {
+	FindAllSql := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers"
+	rows, _ = d.client.Query(FindAllSql)
+	if status != "" {
 		FindAllSql := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers WHERE status = ?"
+		
 		rows, err = d.client.Query(FindAllSql, status)
-	}
-
-	if err != nil {
-		logger.Error("Error while querying customer table" + err.Error())
-		return nil, errs.NewUnexpectedError("Unexpected database error")
+		if err != nil {
+			logger.Error("Error while querying customer table" + err.Error())
+			return nil, errs.NewUnexpectedError("Unexpected database error")
+		}
 	}
 	defer rows.Close()
 
