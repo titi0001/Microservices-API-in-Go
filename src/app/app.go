@@ -23,8 +23,9 @@ func Start() {
 
 	router := mux.NewRouter()
 	repo := domain.NewCustomerRepositoryDb()
+	customerService := service.NewCustomerService(repo)
 
-	ch := CustomerHandler{service.NewCustomerService(repo)}
+	ch := CustomerHandler{service: customerService}
 
 	router.HandleFunc("/customers", ch.getAllCustomers).Methods(http.MethodGet)
 	router.HandleFunc("/customers/{customer_id:[0-9]+}", ch.GetCustomer).Methods(http.MethodGet)
