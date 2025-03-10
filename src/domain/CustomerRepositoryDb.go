@@ -20,8 +20,8 @@ type CustomerRepositoryDb struct {
 func (d CustomerRepositoryDb) FindAll(status string) ([]Customer, *errs.AppError) {
 	customers := make([]Customer, 0)
 
-	if status != "" {
-		findAllSql := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers WHERE status = ?"
+	if status == "" {
+		findAllSql := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers"
 		err := d.client.Select(&customers, findAllSql)
 		if err != nil {
 			logger.Error("Error while scanning customer" + err.Error())
@@ -30,7 +30,7 @@ func (d CustomerRepositoryDb) FindAll(status string) ([]Customer, *errs.AppError
 		findAllSql := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers WHERE status = ?"
 		err := d.client.Select(&customers, findAllSql, status)
 		if err != nil {
-			logger.Error("Error while scanning customer" + err.Error())
+			logger.Error("Error while scanning customer status" + err.Error())
 		}
 	}
 	return customers, nil
