@@ -38,9 +38,20 @@ func (d AccountRepositoryDb) SaveTransaction(t Transaction) (*Transaction, *errs
 		logger.Error("Error while starting a new transaction for bank account transaction: " + err.Error())
 		return nil, errs.NewUnexpectedError("Unexpected database error")
 	}
+	defer func() {
+		if err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				logger.Error("Error while rolling back transaction: " + rollbackErr.Error())
+			}
+		}
+	}()
 
-	result, _ := tx.Exec(`INSET INTO transactions (account_id, amount, transaction_type, transaction_date)
+	result, err := tx.Exec(`INSERT INTO transactions (account_id, amount, transaction_type, transaction_date)
 						values (?, ?, ?, ?)`, t.AccountId, t.Amount, t.TransactionType, t.TransactionDate)
+						if err != nil {
+							logger.Error("Error while inserting transaction: " + err.Error())
+							return nil, errs.NewUnexpectedError("Unexpected database error")
+						}
 
 	if t.IsWithdrawal() {
 		_, err = tx.Exec(`UPDATE accounts SET amount = amount - ? WHERE account_id = ?`, t.Amount, t.AccountId)
@@ -50,13 +61,8 @@ func (d AccountRepositoryDb) SaveTransaction(t Transaction) (*Transaction, *errs
 	} else {
 		_, err = tx.Exec(`UPDATE accounts SET amount = amount + ? WHERE account_id = ?`, t.Amount, t.AccountId)
 		if err != nil {
-			return nil , errs.NewUnexpectedError("Failed to update account for deposit: " + err.Error())
+			return nil, errs.NewUnexpectedError("Failed to update account for deposit: " + err.Error())
 		}
-	}
-
-	if err := tx.Rollback(); err != nil {
-		logger.Error("Error while saving transaction: " + err.Error())
-		return nil, errs.NewUnexpectedError("Unexpected database error")
 	}
 
 	if err = tx.Commit(); err != nil {
