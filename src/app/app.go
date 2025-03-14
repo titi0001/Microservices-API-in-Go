@@ -29,15 +29,31 @@ func Start() {
 	CustomerRepositoryDb := domain.NewCustomerRepositoryDb(dbClient)
 	accountRepositoryDB := domain.NewAccountRepositoryDb(dbClient)
 	customerService := service.NewCustomerService(CustomerRepositoryDb)
-
 	ch := CustomerHandler{service: customerService}
 	ah := AccountHandler{service: service.NewAccountService(accountRepositoryDB)}
 
-	router.HandleFunc("/customers", ch.getAllCustomers).Methods(http.MethodGet)
-	router.HandleFunc("/customers/{customer_id:[0-9]+}", ch.GetCustomer).Methods(http.MethodGet)
-	router.HandleFunc("/customers/{customer_id:[0-9]+}/account", ah.NewAccount).Methods(http.MethodPost)
 	router.
-		HandleFunc("/customers/{customer_id:[0-9]+}/account/{account_id:[0-9]+}", ah.MakeTransaction).Methods(http.MethodPost)
+		HandleFunc("/customers", ch.getAllCustomers).
+		Methods(http.MethodGet).
+		Name("GetAllCustomers")
+
+	router.
+		HandleFunc("/customers/{customer_id:[0-9]+}", ch.GetCustomer).
+		Methods(http.MethodGet).
+		Name("GetCustomers")
+
+	router.
+		HandleFunc("/customers/{customer_id:[0-9]+}/account", ah.NewAccount).
+		Methods(http.MethodPost).
+		Name("NewAccount")
+	router.
+		HandleFunc("/customers/{customer_id:[0-9]+}/account/{account_id:[0-9]+}", ah.MakeTransaction).
+		Methods(http.MethodPost).
+		Name("NewTransaction")
+
+	am := AuthMiddleware{domain.NewAuthRepository()}
+	router.Use(am.authorizationHandler())
+	
 
 	server := &http.Server{
 		Addr:    "localhost:8000",
