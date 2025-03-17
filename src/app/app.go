@@ -1,11 +1,12 @@
 package app
 
 import (
-	"fmt"
-	"log"
+	"context"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -13,91 +14,165 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
 	"github.com/titi0001/Microservices-API-in-Go/src/domain"
+	"github.com/titi0001/Microservices-API-in-Go/src/infrastructure/database"
 	"github.com/titi0001/Microservices-API-in-Go/src/logger"
 	"github.com/titi0001/Microservices-API-in-Go/src/service"
+)
+
+const (
+	MainServerShutdownTimeout = 5 * time.Second
+	AuthServerShutdownTimeout = 5 * time.Second
 )
 
 func Start() {
 
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		logger.Fatal("Error loading .env file", logger.Any("error", err))
 	}
 
-	router := mux.NewRouter()
-	dbClient := getDbClient()
-	CustomerRepositoryDb := domain.NewCustomerRepositoryDb(dbClient)
-	accountRepositoryDB := domain.NewAccountRepositoryDb(dbClient)
-	customerService := service.NewCustomerService(CustomerRepositoryDb)
-	ch := CustomerHandler{service: customerService}
-	ah := AccountHandler{service: service.NewAccountService(accountRepositoryDB)}
-
-	router.
-		HandleFunc("/customers", ch.getAllCustomers).
-		Methods(http.MethodGet).
-		Name("GetAllCustomers")
-
-	router.
-		HandleFunc("/customers/{customer_id:[0-9]+}", ch.GetCustomer).
-		Methods(http.MethodGet).
-		Name("GetCustomers")
-
-	router.
-		HandleFunc("/customers/{customer_id:[0-9]+}/account", ah.NewAccount).
-		Methods(http.MethodPost).
-		Name("NewAccount")
-	router.
-		HandleFunc("/customers/{customer_id:[0-9]+}/account/{account_id:[0-9]+}", ah.MakeTransaction).
-		Methods(http.MethodPost).
-		Name("NewTransaction")
-
-	am := AuthMiddleware{domain.NewAuthRepository()}
-	router.Use(am.authorizationHandler())
+	localHost := os.Getenv("LOCAL_HOST")
+	authHost := os.Getenv("AUTH_LOCAL_HOST")
 	
-
-	server := &http.Server{
-		Addr:    "localhost:8000",
-		Handler: router,
+	if localHost == "" || authHost == "" {
+		logger.Fatal("Required environment variables not set", 
+			logger.String("LOCAL_HOST", localHost),
+			logger.String("AUTH_LOCAL_HOST", authHost))
 	}
+	
+	authServerURL := authHost
+	if !strings.HasPrefix(authServerURL, "http://") {
+		authServerURL = "http://" + authServerURL
+	}
+	
+	dbClient := database.GetClient()
 
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	authServer := setupAuthServer(authHost, authServerURL, dbClient)
 	go func() {
-		fmt.Println("Server started on localhost:8000")
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Println("Error starting server:", err)
+		defer wg.Done()
+		logger.Info("Auth server starting on", logger.String("address", authHost))
+		if err := authServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Error starting auth server", logger.Any("error", err))
 		}
 	}()
 
-	// Aguardar sinal para fechar o servidor
+	mainServer := setupMainServer(localHost, authServerURL, dbClient)
+	go func() {
+		defer wg.Done()
+		logger.Info("Main server starting on", logger.String("address", localHost))
+		if err := mainServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Error starting main server", logger.Any("error", err))
+		}
+	}()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	// Fechar o banco de dados
-	fmt.Println("Shutting down server...")
-	CustomerRepositoryDb.Close()
+	logger.Info("Received shutdown signal, stopping servers")
 
+	shutdownServer(mainServer, "main server", MainServerShutdownTimeout)
+	shutdownServer(authServer, "auth server", AuthServerShutdownTimeout)
+
+	dbClient.Close()
+	logger.Info("All servers shut down successfully")
 }
 
-func getDbClient() *sqlx.DB {
-	user := os.Getenv("MYSQL_USER")
-	password := os.Getenv("MYSQL_PASSWORD")
-	dbName := os.Getenv("MYSQL_DATABASE")
-	host := "localhost"
-	port := "3306"
 
-	if user == "" || password == "" || dbName == "" {
-		log.Fatal("Missing required environment variables: MYSQL_USER, MYSQL_PASSWORD, or MYSQL_DATABASE")
+func setupAuthServer(host string, serviceURL string, dbClient *sqlx.DB) *http.Server {
+	router := mux.NewRouter()
+	
+	authRepositoryDb := domain.NewAuthRepositoryDb(dbClient)
+	authService := service.NewAuthService(serviceURL, authRepositoryDb)
+	authHandler := NewAuthHandler(authService)
+
+	router.
+		HandleFunc("/auth/login", authHandler.Login).
+		Methods(http.MethodPost).
+		Name("AuthLogin")
+
+	router.
+		HandleFunc("/auth/verify", authHandler.Verify).
+		Methods(http.MethodGet).
+		Name("VerifyToken")
+
+	return &http.Server{
+		Addr:    host,
+		Handler: router,
 	}
-	// string de conexão .env
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", user, password, host, port, dbName)
+}
 
-	client, err := sqlx.Open("mysql", dsn)
-	if err != nil {
-		logger.Error("Error connecting to database" + err.Error())
+func setupMainServer(host string, authServerURL string, dbClient *sqlx.DB) *http.Server {
+	router := mux.NewRouter()
+	
+	customerRepositoryDb := domain.NewCustomerRepositoryDb(dbClient)
+	accountRepositoryDB := domain.NewAccountRepositoryDb(dbClient)
+	authRepositoryDb := domain.NewAuthRepositoryDb(dbClient)
+
+	customerService := service.NewCustomerService(customerRepositoryDb)
+	accountService := service.NewAccountService(accountRepositoryDB)
+	authService := service.NewAuthService(authServerURL, authRepositoryDb)
+
+	ch := CustomerHandler{service: customerService}
+	ah := AccountHandler{service: accountService}
+	auth := NewAuthHandler(authService)
+	am := AuthMiddleware{repo: authRepositoryDb}
+
+	setupRoutes(router, ch, ah, auth, am)
+
+	return &http.Server{
+		Addr:    host,
+		Handler: router,
 	}
+}
 
-	client.SetConnMaxLifetime(time.Minute * 3)
-	client.SetMaxOpenConns(10)
-	client.SetMaxIdleConns(10)
-	return client
+func shutdownServer(server *http.Server, name string, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		logger.Error("Error shutting down "+name, logger.Any("error", err))
+	} else {
+		logger.Info(name + " shut down successfully")
+	}
+}
+
+func setupRoutes(router *mux.Router, ch CustomerHandler, ah AccountHandler, auth *AuthHandler, am AuthMiddleware) {
+	publicRouter := router.PathPrefix("").Subrouter()
+
+	publicRouter.
+		HandleFunc("/auth/login", auth.Login).
+		Methods(http.MethodPost).
+		Name("AuthLogin")
+
+	protectedRouter := router.PathPrefix("").Subrouter()
+	protectedRouter.Use(am.authorizationHandler())
+
+	protectedRouter.
+		HandleFunc("/auth/verify", auth.Verify).
+		Methods(http.MethodGet).
+		Name("AuthVerify")
+
+	protectedRouter.
+		HandleFunc("/customers", ch.getAllCustomers).
+		Methods(http.MethodGet).
+		Name("GetAllCustomers")
+
+	protectedRouter.
+		HandleFunc("/customers/{customer_id:[0-9]+}", ch.GetCustomer).
+		Methods(http.MethodGet).
+		Name("GetCustomer")
+
+	protectedRouter.
+		HandleFunc("/customers/{customer_id:[0-9]+}/account", ah.NewAccount).
+		Methods(http.MethodPost).
+		Name("NewAccount")
+
+	protectedRouter.
+		HandleFunc("/customers/{customer_id:[0-9]+}/account/{account_id:[0-9]+}", ah.MakeTransaction).
+		Methods(http.MethodPost).
+		Name("NewTransaction")
 }
