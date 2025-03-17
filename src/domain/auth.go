@@ -23,4 +23,7 @@ type AuthRepository interface {
 type AuthService interface {
 	RemoteLogin(body io.Reader) ([]byte, *errs.AppError)
 	RemoteIsAuthorized(token string, routeName string, vars map[string]string) (bool, *errs.AppError)
+	GetRolePermissions() RolePermissions
+	GetSecretKey() []byte 
 }
+
