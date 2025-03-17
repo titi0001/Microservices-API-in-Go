@@ -21,9 +21,18 @@ const (
 )
 
 type authService struct {
-	authServerURL string
-	jwtSecretKey  []byte
-	repository    domain.AuthRepository
+	authServerURL  string
+	jwtSecretKey   []byte
+	repository     domain.AuthRepository
+	rolePermissions domain.RolePermissions
+}
+
+func (s *authService) GetRolePermissions() domain.RolePermissions {
+	return s.rolePermissions
+}
+
+func (s *authService) GetSecretKey() []byte {
+	return s.jwtSecretKey
 }
 
 func NewAuthService(authServerURL string, repository domain.AuthRepository) domain.AuthService {
@@ -34,9 +43,10 @@ func NewAuthService(authServerURL string, repository domain.AuthRepository) doma
 	}
 
 	return &authService{
-		authServerURL: authServerURL,
-		jwtSecretKey:  []byte(jwtSecret),
-		repository:    repository,
+		authServerURL:  authServerURL,
+		jwtSecretKey:   []byte(jwtSecret),
+		repository:     repository,
+		rolePermissions: domain.GetRolePermissions(),
 	}
 }
 
@@ -98,7 +108,7 @@ func (s *authService) generateToken(req dto.LoginRequest, user *domain.User) (st
 	claims := jwt.MapClaims{
 		"username":   req.Username,
 		"role":       user.Role,
-		"created_on": user.CreatedOn, 
+		"created_on": user.CreatedOn,
 		"exp":        time.Now().Add(time.Hour * tokenExpiryHours).Unix(),
 		"iat":        time.Now().Unix(),
 	}
@@ -148,6 +158,13 @@ func (s *authService) RemoteIsAuthorized(token string, routeName string, vars ma
 	if !ok {
 		logger.Error("Role not found in token claims")
 		return false, errs.NewUnexpectedError("Invalid token claims: role not found")
+	}
+
+	if !s.rolePermissions.IsAuthorizedFor(role, routeName) {
+		logger.Warn("Unauthorized access attempt",
+			logger.String("role", role),
+			logger.String("routeName", routeName))
+		return false, errs.NewForbiddenError("Insufficient permissions for route " + routeName)
 	}
 
 	customerId := claims["customer_id"]
