@@ -32,7 +32,7 @@ type AuthMiddleware struct {
 func NewAuthMiddleware(repo domain.AuthRepository) AuthMiddleware {
 	return AuthMiddleware{
 		repo:            repo,
-		rolePermissions: domain.GetRolePermissions(),
+		rolePermissions: *domain.GetRolePermissions(),
 	}
 }
 
