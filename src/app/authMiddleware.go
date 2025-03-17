@@ -25,7 +25,15 @@ var (
 )
 
 type AuthMiddleware struct {
-	repo domain.AuthRepository
+	repo            domain.AuthRepository
+	rolePermissions domain.RolePermissions
+}
+
+func NewAuthMiddleware(repo domain.AuthRepository) AuthMiddleware {
+	return AuthMiddleware{
+		repo:            repo,
+		rolePermissions: domain.GetRolePermissions(),
+	}
 }
 
 func (a AuthMiddleware) authorizationHandler() func(http.Handler) http.Handler {
@@ -43,8 +51,8 @@ func (a AuthMiddleware) authorizationHandler() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			currentRoute := mux.CurrentRoute(r)
-			routeName := currentRoute.GetName()
-			if routeName == "AuthLogin" {
+			currentRouteName := currentRoute.GetName()
+			if currentRouteName == "AuthLogin" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -57,8 +65,7 @@ func (a AuthMiddleware) authorizationHandler() func(http.Handler) http.Handler {
 			if authHeader != "" {
 				token := getTokenFromHeader(authHeader)
 
-				verifyURL := domain.BuildVerifyUrl(token, routeName, currentRouteVars)
-
+				verifyURL := domain.BuildVerifyUrl(token, currentRouteName, currentRouteVars)
 				client := &http.Client{
 					Timeout: TokenVerificationTimeout,
 				}
@@ -87,7 +94,7 @@ func (a AuthMiddleware) authorizationHandler() func(http.Handler) http.Handler {
 					return
 				}
 
-				var verifyResponse map[string]bool
+				var verifyResponse map[string]interface{}
 				if err := json.Unmarshal(responseBody, &verifyResponse); err != nil {
 					logger.Error("Error parsing response", logger.Any("error", err))
 					appError := errs.AppError{Code: StatusInternalServerError, Message: MsgTokenVerificationError}
@@ -95,9 +102,37 @@ func (a AuthMiddleware) authorizationHandler() func(http.Handler) http.Handler {
 					return
 				}
 
-				isAuthorized, ok := verifyResponse["isAuthorized"]
+				isAuthorized, ok := verifyResponse["isAuthorized"].(bool)
 				if !ok || !isAuthorized {
 					appError := errs.AppError{Code: StatusForbidden, Message: MsgUnauthorized}
+					utils.WriteResponse(w, appError.Code, appError.AsMessage())
+					return
+				}
+
+				var userRole string
+				if role, ok := verifyResponse["role"].(string); ok {
+					userRole = role
+				} else if claims, ok := verifyResponse["claims"].(map[string]interface{}); ok {
+					if role, ok := claims["role"].(string); ok {
+						userRole = role
+					} else {
+						logger.Error("Role not found in token claims or response")
+						appError := errs.AppError{Code: StatusInternalServerError, Message: "Invalid token claims"}
+						utils.WriteResponse(w, appError.Code, appError.AsMessage())
+						return
+					}
+				} else {
+					logger.Error("No role or claims found in response")
+					appError := errs.AppError{Code: StatusInternalServerError, Message: "Invalid response format"}
+					utils.WriteResponse(w, appError.Code, appError.AsMessage())
+					return
+				}
+
+				if !a.rolePermissions.IsAuthorizedFor(userRole, currentRouteName) {
+					logger.Error("Unauthorized access",
+						logger.String("role", userRole),
+						logger.String("routeName", currentRouteName))
+					appError := errs.AppError{Code: StatusForbidden, Message: "Insufficient permissions"}
 					utils.WriteResponse(w, appError.Code, appError.AsMessage())
 					return
 				}
