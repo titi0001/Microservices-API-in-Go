@@ -19,13 +19,17 @@ import (
 	"github.com/titi0001/Microservices-API-in-Go/src/service"
 )
 
+var (
+	authServerMutex sync.Mutex
+	authServiceURL  string
+)
+
 const (
 	MainServerShutdownTimeout = 5 * time.Second
 	AuthServerShutdownTimeout = 5 * time.Second
 )
 
 func Start() {
-
 	err := godotenv.Load()
 	if err != nil {
 		logger.Fatal("Error loading .env file", logger.Any("error", err))
@@ -33,24 +37,27 @@ func Start() {
 
 	localHost := os.Getenv("LOCAL_HOST")
 	authHost := os.Getenv("AUTH_LOCAL_HOST")
-	
+
 	if localHost == "" || authHost == "" {
-		logger.Fatal("Required environment variables not set", 
+		logger.Fatal("Required environment variables not set",
 			logger.String("LOCAL_HOST", localHost),
 			logger.String("AUTH_LOCAL_HOST", authHost))
 	}
-	
-	authServerURL := authHost
-	if !strings.HasPrefix(authServerURL, "http://") {
-		authServerURL = "http://" + authServerURL
+
+	authServiceURL = authHost
+	if !strings.HasPrefix(authServiceURL, "http://") {
+		authServiceURL = "http://" + authServiceURL
 	}
-	
+
 	dbClient := database.GetClient()
+	if dbClient == nil {
+		logger.Fatal("Failed to connect to database")
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	authServer := setupAuthServer(authHost, authServerURL, dbClient)
+	authServer := setupAuthServer(authHost, authServiceURL, dbClient)
 	go func() {
 		defer wg.Done()
 		logger.Info("Auth server starting on", logger.String("address", authHost))
@@ -59,7 +66,9 @@ func Start() {
 		}
 	}()
 
-	mainServer := setupMainServer(localHost, authServerURL, dbClient)
+	time.Sleep(200 * time.Millisecond)
+
+	mainServer := setupMainServer(localHost, authServiceURL, dbClient)
 	go func() {
 		defer wg.Done()
 		logger.Info("Main server starting on", logger.String("address", localHost))
@@ -81,10 +90,9 @@ func Start() {
 	logger.Info("All servers shut down successfully")
 }
 
-
 func setupAuthServer(host string, serviceURL string, dbClient *sqlx.DB) *http.Server {
 	router := mux.NewRouter()
-	
+
 	authRepositoryDb := domain.NewAuthRepositoryDb(dbClient)
 	authService := service.NewAuthService(serviceURL, authRepositoryDb)
 	authHandler := NewAuthHandler(authService)
@@ -100,14 +108,17 @@ func setupAuthServer(host string, serviceURL string, dbClient *sqlx.DB) *http.Se
 		Name("VerifyToken")
 
 	return &http.Server{
-		Addr:    host,
-		Handler: router,
+		Addr:         host,
+		Handler:      router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 }
 
 func setupMainServer(host string, authServerURL string, dbClient *sqlx.DB) *http.Server {
 	router := mux.NewRouter()
-	
+
 	customerRepositoryDb := domain.NewCustomerRepositoryDb(dbClient)
 	accountRepositoryDB := domain.NewAccountRepositoryDb(dbClient)
 	authRepositoryDb := domain.NewAuthRepositoryDb(dbClient)
@@ -119,13 +130,16 @@ func setupMainServer(host string, authServerURL string, dbClient *sqlx.DB) *http
 	ch := CustomerHandler{service: customerService}
 	ah := AccountHandler{service: accountService}
 	auth := NewAuthHandler(authService)
-	am := AuthMiddleware{repo: authRepositoryDb}
+	am := NewAuthMiddleware(authRepositoryDb)
 
 	setupRoutes(router, ch, ah, auth, am)
 
 	return &http.Server{
-		Addr:    host,
-		Handler: router,
+		Addr:         host,
+		Handler:      router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 }
 
@@ -175,4 +189,8 @@ func setupRoutes(router *mux.Router, ch CustomerHandler, ah AccountHandler, auth
 		HandleFunc("/customers/{customer_id:[0-9]+}/account/{account_id:[0-9]+}", ah.MakeTransaction).
 		Methods(http.MethodPost).
 		Name("NewTransaction")
+}
+
+func GetAuthServiceURL() string {
+	return authServiceURL
 }
