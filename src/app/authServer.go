@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/titi0001/Microservices-API-in-Go/src/domain"
@@ -14,28 +17,51 @@ import (
 	"github.com/titi0001/Microservices-API-in-Go/src/service"
 )
 
-var (
-	authServer       *http.Server
-	authServerCancel context.CancelFunc
-	authServerWg     sync.WaitGroup
+const (
+	AuthServerDialTimeout = 100 * time.Millisecond
 )
 
-func StartAuthServer() {
+var (
+	authServer        *http.Server
+	authServerCancel  context.CancelFunc
+	authServerWg      sync.WaitGroup
+	authServerStarted bool
+)
+
+func StartAuthServer() error {
 	authServerMutex.Lock()
 	defer authServerMutex.Unlock()
 
+	if authServerStarted {
+		logger.Info("Auth server already started or attempted to start")
+		return nil
+	}
+	authServerStarted = true
+
 	if authServer != nil {
-		logger.Info("Auth server already running")
-		return
+		logger.Info("Auth server instance already exists")
+		return nil
 	}
 
 	authHost := os.Getenv("AUTH_LOCAL_HOST")
 	if authHost == "" {
-		logger.Fatal("AUTH_LOCAL_HOST environment variable not set")
+		logger.Error("AUTH_LOCAL_HOST environment variable not set")
+		return errors.New("AUTH_LOCAL_HOST environment variable not set")
+	}
+
+	conn, err := net.DialTimeout("tcp", authHost, AuthServerDialTimeout)
+	if err == nil {
+		conn.Close()
+		logger.Info("Auth server port already in use, assuming server is running externally")
+		return nil
 	}
 
 	router := mux.NewRouter()
 	dbClient := database.GetClient()
+	if dbClient == nil {
+		logger.Error("Failed to connect to database")
+		return errors.New("failed to connect to database")
+	}
 	authRepositoryDb := domain.NewAuthRepositoryDb(dbClient)
 
 	serviceURL := authHost
@@ -57,8 +83,11 @@ func StartAuthServer() {
 		Name("VerifyToken")
 
 	authServer = &http.Server{
-		Addr:    authHost,
-		Handler: router,
+		Addr:         authHost,
+		Handler:      router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	var ctx context.Context
@@ -72,8 +101,9 @@ func StartAuthServer() {
 		if err := authServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Error starting auth server", logger.Any("error", err))
 		}
-
-		dbClient.Close()
+		if dbClient != nil {
+			dbClient.Close()
+		}
 		logger.Info("Auth server resources cleaned up")
 	}()
 
@@ -91,22 +121,38 @@ func StartAuthServer() {
 		authServerMutex.Lock()
 		authServer = nil
 		authServerMutex.Unlock()
-
 		logger.Info("Auth server shut down successfully")
 	}()
+	return nil
 }
 
 func StopAuthServer() {
 	authServerMutex.Lock()
-	defer authServerMutex.Unlock()
-
 	if authServer == nil {
+		authServerMutex.Unlock()
 		logger.Info("Auth server not running")
 		return
 	}
-	if authServerCancel != nil {
-		authServerCancel()
+	cancel := authServerCancel
+	authServerMutex.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	authServerWg.Wait()
+	logger.Info("Auth server stopped completely")
+}
+
+func IsAuthServerRunning() bool {
+	authHost := os.Getenv("AUTH_LOCAL_HOST")
+	if authHost == "" {
+		return false
 	}
 
-	authServerWg.Wait()
+	conn, err := net.DialTimeout("tcp", authHost, AuthServerDialTimeout)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
