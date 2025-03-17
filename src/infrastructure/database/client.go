@@ -1,4 +1,3 @@
-// File: src/infrastructure/database/client.go
 package database
 
 import (
