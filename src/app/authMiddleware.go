@@ -1,12 +1,27 @@
 package app
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/titi0001/Microservices-API-in-Go/src/domain"
 	"github.com/titi0001/Microservices-API-in-Go/src/errs"
+	"github.com/titi0001/Microservices-API-in-Go/src/infrastructure/utils"
+	"github.com/titi0001/Microservices-API-in-Go/src/logger"
+)
+
+const (
+	TokenVerificationTimeout = 3 * time.Second
+)
+
+var (
+	authServerStarted bool
+	authServerMutex   sync.Mutex
 )
 
 type AuthMiddleware struct {
@@ -14,27 +29,97 @@ type AuthMiddleware struct {
 }
 
 func (a AuthMiddleware) authorizationHandler() func(http.Handler) http.Handler {
+	const (
+		StatusUnauthorized        = http.StatusUnauthorized
+		StatusForbidden           = http.StatusForbidden
+		StatusInternalServerError = http.StatusInternalServerError
+
+		MsgUnauthorized             = "Unauthorized"
+		MsgMissingToken             = "missing token"
+		MsgTokenVerificationError   = "Error verifying token"
+		MsgTokenVerificationTimeout = "Timeout verifying token"
+	)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			currentRoute := mux.CurrentRoute(r)
+			routeName := currentRoute.GetName()
+			if routeName == "AuthLogin" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			startAuthServerIfNeeded()
+
 			currentRouteVars := mux.Vars(r)
 			authHeader := r.Header.Get("Authorization")
 
 			if authHeader != "" {
 				token := getTokenFromHeader(authHeader)
 
-				isAuthorized := a.repo.IsAuthorized(token, currentRoute.GetName(), currentRouteVars)
-				if isAuthorized {
-					next.ServeHTTP(w, r)
-				} else {
-					appError := errs.AppError{Code: http.StatusForbidden, Message: "Unauthorized"}
-					writeResponse(w, appError.Code, appError.AsMessage())
-				}
-			} else {
-				writeResponse(w, http.StatusUnauthorized, "missing token")
-			}
+				verifyURL := domain.BuildVerifyUrl(token, routeName, currentRouteVars)
 
+				client := &http.Client{
+					Timeout: TokenVerificationTimeout,
+				}
+
+				resp, err := client.Get(verifyURL)
+				if err != nil {
+					logger.Error("Error verifying token", logger.Any("error", err))
+					appError := errs.AppError{Code: StatusInternalServerError, Message: MsgTokenVerificationError}
+					utils.WriteResponse(w, appError.Code, appError.AsMessage())
+					return
+				}
+				defer resp.Body.Close()
+
+				if resp.StatusCode != http.StatusOK {
+					logger.Warn("Token verification failed", logger.Int("status", resp.StatusCode))
+					appError := errs.AppError{Code: StatusUnauthorized, Message: MsgUnauthorized}
+					utils.WriteResponse(w, appError.Code, appError.AsMessage())
+					return
+				}
+
+				responseBody, err := io.ReadAll(resp.Body)
+				if err != nil {
+					logger.Error("Error reading response body", logger.Any("error", err))
+					appError := errs.AppError{Code: StatusInternalServerError, Message: MsgTokenVerificationError}
+					utils.WriteResponse(w, appError.Code, appError.AsMessage())
+					return
+				}
+
+				var verifyResponse map[string]bool
+				if err := json.Unmarshal(responseBody, &verifyResponse); err != nil {
+					logger.Error("Error parsing response", logger.Any("error", err))
+					appError := errs.AppError{Code: StatusInternalServerError, Message: MsgTokenVerificationError}
+					utils.WriteResponse(w, appError.Code, appError.AsMessage())
+					return
+				}
+
+				isAuthorized, ok := verifyResponse["isAuthorized"]
+				if !ok || !isAuthorized {
+					appError := errs.AppError{Code: StatusForbidden, Message: MsgUnauthorized}
+					utils.WriteResponse(w, appError.Code, appError.AsMessage())
+					return
+				}
+
+				next.ServeHTTP(w, r)
+			} else {
+				utils.WriteResponse(w, StatusUnauthorized, MsgMissingToken)
+			}
 		})
+	}
+}
+
+func startAuthServerIfNeeded() {
+	authServerMutex.Lock()
+	defer authServerMutex.Unlock()
+
+	if !authServerStarted {
+		go StartAuthServer()
+		authServerStarted = true
+
+		time.Sleep(200 * time.Millisecond)
+		logger.Info("Auth server started on demand")
 	}
 }
 
