@@ -157,7 +157,7 @@ func setupRoutes(router *mux.Router, ch CustomerHandler, ah AccountHandler, auth
 		Name("AuthVerify")
 
 	protectedRouter.
-		HandleFunc("/customers", ch.getAllCustomers).
+		HandleFunc("/customers", ch.GetAllCustomers).
 		Methods(http.MethodGet).
 		Name("GetAllCustomers")
 
