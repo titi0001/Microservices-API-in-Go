@@ -7,6 +7,8 @@ import (
 
 var log *zap.Logger
 
+type Field = zap.Field
+
 func init() {
 	var err error
 
@@ -39,4 +41,28 @@ func Debug(message string, fields ...zap.Field) {
 
 func Error(message string, fields ...zap.Field) {
 	log.Error(message, fields...)
+}
+
+func Warn(message string, fields ...zap.Field) {
+	log.Warn(message, fields...)
+}
+
+func String(key string, value string) Field {
+	return zap.String(key, value)
+}
+
+func Int(key string, value int) Field {
+	return zap.Int(key, value)
+}
+
+func Bool(key string, value bool) Field {
+	return zap.Bool(key, value)
+}
+
+func Float64(key string, value float64) Field {
+	return zap.Float64(key, value)
+}
+
+func Any(key string, value interface{}) Field {
+	return zap.Any(key, value)
 }
