@@ -1,11 +1,10 @@
 package app
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/titi0001/Microservices-API-in-Go/src/infrastructure/utils"
 	"github.com/titi0001/Microservices-API-in-Go/src/service"
 )
 
@@ -22,7 +21,7 @@ func (ch *CustomerHandler) getAllCustomers(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeResponse(w, http.StatusOK, customers)
+	utils.WriteResponse(w, http.StatusOK, customers)  
 }
 
 func (ch *CustomerHandler) GetCustomer(w http.ResponseWriter, r *http.Request) {
@@ -31,16 +30,8 @@ func (ch *CustomerHandler) GetCustomer(w http.ResponseWriter, r *http.Request) {
 
 	customer, err := ch.service.GetCustomer(id)
 	if err != nil {
-		writeResponse(w, err.Code, err.AsMessage())
+		utils.WriteResponse(w, err.Code, err.AsMessage())  
 	} else {
-		writeResponse(w, http.StatusOK, customer)
-	}
-}
-
-func writeResponse(w http.ResponseWriter, code int, data any) {
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(code)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		fmt.Printf("failed to encode response: %v\n", err)
+		utils.WriteResponse(w, http.StatusOK, customer)  
 	}
 }
