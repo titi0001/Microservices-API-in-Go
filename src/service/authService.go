@@ -24,10 +24,10 @@ type authService struct {
 	authServerURL  string
 	jwtSecretKey   []byte
 	repository     domain.AuthRepository
-	rolePermissions domain.RolePermissions
+	rolePermissions *domain.RolePermissions
 }
 
-func (s *authService) GetRolePermissions() domain.RolePermissions {
+func (s *authService) GetRolePermissions() *domain.RolePermissions {
 	return s.rolePermissions
 }
 
