@@ -5,7 +5,7 @@ import (
 	"github.com/titi0001/Microservices-API-in-Go/src/dto"
 	"github.com/titi0001/Microservices-API-in-Go/src/errs"
 )
-
+//go:generate mockgen -destination=../mocks/service/mockCustomerService.go -package=service github.com/titi0001/Microservices-API-in-Go/src/service CustomerService
 type CustomerService interface {
 	GetCustomer(string) (*dto.CustomerResponse, *errs.AppError)
 	GetAllCustomer(status string) ([]dto.CustomerResponse, *errs.AppError)
