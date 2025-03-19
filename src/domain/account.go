@@ -20,6 +20,7 @@ func (a Account) ToNewAccountResponseDto() *dto.NewAccountResponse {
 	return &dto.NewAccountResponse{AccountId: a.AccountId}
 }
 
+//go:generate mockgen -destination=../mocks/domain/mockAccountRepository.go -package=domain github.com/titi0001/Microservices-API-in-Go/src/domain AccountRepository
 type AccountRepository interface {
 	Save(Account) (*Account, *errs.AppError)
 	SaveTransaction(transaction Transaction) (*Transaction, *errs.AppError)
