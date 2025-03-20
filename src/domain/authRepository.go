@@ -20,23 +20,23 @@ type AuthRepositoryDb struct {
 }
 
 func (d AuthRepositoryDb) FindUser(username, password string) (*User, *errs.AppError) {
-    query := `SELECT username, role, customer_id, created_on 
+	query := `SELECT username, role, customer_id, created_on 
               FROM users 
               WHERE username = ? AND password = ?`
 
-    var user User
-    err := d.client.Get(&user, query, username, password)
+	var user User
+	err := d.client.Get(&user, query, username, password)
 
-    if err != nil {
-        if err == sql.ErrNoRows {
-            logger.Warn("Invalid credentials", logger.String("username", username))
-            return nil, errs.NewAuthenticationError("Invalid credentials")
-        }
-        logger.Error("Error querying user: " + err.Error())
-        return nil, errs.NewUnexpectedError("Database error")
-    }
+	if err != nil {
+		if err == sql.ErrNoRows {
+			logger.Warn("Invalid credentials", logger.String("username", username))
+			return nil, errs.NewAuthenticationError("Invalid credentials")
+		}
+		logger.Error("Error querying user: " + err.Error())
+		return nil, errs.NewUnexpectedError("Database error")
+	}
 
-    return &user, nil
+	return &user, nil
 }
 
 func (d AuthRepositoryDb) VerifyPermission(role string, customerId interface{}, routeName string, vars map[string]string) bool {
@@ -143,13 +143,26 @@ func BuildVerifyUrl(token string, routeName string, vars map[string]string) stri
 	return u.String()
 }
 
+func (d AuthRepositoryDb) SaveRefreshToken(username, refreshToken string) *errs.AppError {
+	sqlInsert := "INSERT INTO refresh_token_store (refresh_token, created_on) VALUES ( ?, NOW())"
+
+	_, err := d.client.Exec(sqlInsert, refreshToken)
+	if err != nil {
+		logger.Error("Error while saving refresh token" + err.Error())
+		return errs.NewUnexpectedError("Unexpected database error while saving refresh token")
+	}
+
+	return nil
+
+}
+
 func NewAuthRepository(authService AuthService) RemoteAuthRepository {
 	return RemoteAuthRepository{
 		authService: authService,
 	}
 }
 
-func NewAuthRepositoryDb(dbClient *sqlx.DB) AuthRepositoryDb {
+func NewAuthRepositoryDb(dbClient *sqlx.DB) AuthRepository {
 	return AuthRepositoryDb{
 		client: dbClient,
 	}
