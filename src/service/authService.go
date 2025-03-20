@@ -21,9 +21,9 @@ const (
 )
 
 type authService struct {
-	authServerURL  string
-	jwtSecretKey   []byte
-	repository     domain.AuthRepository
+	authServerURL   string
+	jwtSecretKey    []byte
+	repository      domain.AuthRepository
 	rolePermissions *domain.RolePermissions
 }
 
@@ -43,9 +43,9 @@ func NewAuthService(authServerURL string, repository domain.AuthRepository) doma
 	}
 
 	return &authService{
-		authServerURL:  authServerURL,
-		jwtSecretKey:   []byte(jwtSecret),
-		repository:     repository,
+		authServerURL:   authServerURL,
+		jwtSecretKey:    []byte(jwtSecret),
+		repository:      repository,
 		rolePermissions: domain.GetRolePermissions(),
 	}
 }
@@ -72,8 +72,20 @@ func (s *authService) RemoteLogin(body io.Reader) ([]byte, *errs.AppError) {
 		return nil, errs.NewUnexpectedError("Failed to generate authentication token")
 	}
 
+	refreshToken, refreshErr := s.generateRefreshToken(req.Username)
+	if refreshErr != nil {
+		logger.Error("Error generating refresh", logger.Any("error", refreshErr))
+		return nil, errs.NewUnexpectedError("Failed to generate refresh token")
+	}
+
+	if saveErr := s.repository.SaveRefreshToken(req.Username, refreshToken); saveErr != nil {
+		logger.Error("Error saving refresh token to database", logger.Any("error", saveErr))
+		return nil, errs.NewUnexpectedError("Failed to save refresh token")
+	}
+
 	respBody := dto.LoginResponse{
 		Token: token,
+		RefreshToken: refreshToken,
 	}
 
 	jsonResp, jsonErr := json.Marshal(respBody)
@@ -110,7 +122,6 @@ func (s *authService) generateToken(req dto.LoginRequest, user *domain.User) (st
 		"role":       user.Role,
 		"created_on": user.CreatedOn,
 		"exp":        time.Now().Add(time.Hour * tokenExpiryHours).Unix(),
-		"iat":        time.Now().Unix(),
 	}
 
 	if user.CustomerId.Valid {
@@ -180,4 +191,19 @@ func (s *authService) RemoteIsAuthorized(token string, routeName string, vars ma
 	logger.Info("Access authorized",
 		logger.String("routeName", routeName))
 	return true, nil
+}
+
+func (s *authService) generateRefreshToken(username string) (string, error) {
+	refreshClaims := jwt.MapClaims{
+		"type":     "refresh_token",
+		"username": username,
+		"exp":      time.Now().Add(time.Hour * 24 * 30).Unix(),
+	}
+
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshTokenString, err := refreshToken.SignedString(s.jwtSecretKey)
+	if err != nil {
+		return "", err
+	}
+	return refreshTokenString, nil
 }
