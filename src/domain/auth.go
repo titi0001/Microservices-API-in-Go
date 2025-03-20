@@ -9,6 +9,7 @@ import (
 type AuthRepository interface {
 	FindUser(username, password string) (*User, *errs.AppError)
 	VerifyPermission(role string, customerId interface{}, routeName string, vars map[string]string) bool
+	SaveRefreshToken(username, refreshToken string) *errs.AppError
 }
 
 type AuthService interface {
