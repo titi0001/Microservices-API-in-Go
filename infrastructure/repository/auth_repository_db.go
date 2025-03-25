@@ -2,10 +2,11 @@ package repository
 
 import (
 	"database/sql"
+	"strconv"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/titi0001/Microservices-API-in-Go/domain"
-	"github.com/titi0001/Microservices-API-in-Go/domain/ports" // Adicionado
+	"github.com/titi0001/Microservices-API-in-Go/domain/ports"
 	"github.com/titi0001/Microservices-API-in-Go/errs"
 	"github.com/titi0001/Microservices-API-in-Go/infrastructure/utils"
 	"github.com/titi0001/Microservices-API-in-Go/logger"
@@ -16,7 +17,7 @@ type AuthRepositoryDb struct {
 }
 
 type RemoteAuthRepository struct {
-	authService ports.AuthService 
+	authService ports.AuthService
 }
 
 func NewAuthRepositoryDb(dbClient *sqlx.DB) AuthRepositoryDb {
@@ -41,6 +42,25 @@ func (d AuthRepositoryDb) FindUser(username, password string) (*domain.User, *er
 		logger.Error("Error querying user", logger.Any("error", err))
 		return nil, errs.NewUnexpectedError("Unexpected database error")
 	}
+	return &user, nil
+}
+
+func (d AuthRepositoryDb) SaveUser(user domain.User) (*domain.User, *errs.AppError) {
+	query := `INSERT INTO users (username, password, role, customer_id, created_on) 
+              VALUES (?, ?, ?, ?, ?)`
+	result, err := d.client.Exec(query, user.Username, user.Password, user.Role, user.CustomerID, user.CreatedOn)
+	if err != nil {
+		logger.Error("Error saving new user", logger.Any("error", err))
+		return nil, errs.NewUnexpectedError("Unexpected database error")
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		logger.Error("Error getting last insert ID for new user", logger.Any("error", err))
+		return nil, errs.NewUnexpectedError("Unexpected database error")
+	}
+
+	user.ID = strconv.FormatInt(id, 10)
 	return &user, nil
 }
 
@@ -102,6 +122,10 @@ func (d AuthRepositoryDb) verifyCustomerSpecificRoute(role string, customerId st
 }
 
 func (r RemoteAuthRepository) FindUser(username, password string) (*domain.User, *errs.AppError) {
+	return nil, errs.NewUnexpectedError("Method not implemented")
+}
+
+func (r RemoteAuthRepository) SaveUser(user domain.User) (*domain.User, *errs.AppError) {
 	return nil, errs.NewUnexpectedError("Method not implemented")
 }
 
