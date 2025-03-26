@@ -1,9 +1,6 @@
 package service
 
 import (
-	"encoding/json"
-	"io"
-	"net/http"
 	"os"
 	"time"
 
@@ -36,19 +33,22 @@ func NewAuthService(serviceURL string, repo ports.AuthRepository) *AuthService {
 }
 
 func (s *AuthService) RemoteLogin(req dto.LoginRequest) (*dto.LoginResponse, *errs.AppError) {
-
 	user, err := s.repo.FindUser(req.Username, req.Password)
 	if err != nil {
 		return nil, err
 	}
 
+	customerIDClaim := ""
+	if user.CustomerID != nil {
+		customerIDClaim = *user.CustomerID
+	}
+
 	claims := jwt.MapClaims{
 		"username":    user.Username,
 		"role":        user.Role,
-		"customer_id": user.CustomerID,
-		"exp":         jwt.TimeFunc().Add(24 * time.Hour).Unix(), // Expira em 24 horas
+		"customer_id": customerIDClaim,
+		"exp":         jwt.TimeFunc().Add(24 * time.Hour).Unix(),
 	}
-
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, signErr := token.SignedString(s.secretKey)
@@ -61,14 +61,18 @@ func (s *AuthService) RemoteLogin(req dto.LoginRequest) (*dto.LoginResponse, *er
 }
 
 func (s *AuthService) Register(req dto.RegisterRequest) (*dto.LoginResponse, *errs.AppError) {
+	var customerID *string
+	if req.CustomerID != "" {
+		customerID = &req.CustomerID
+	}
+
 	user := domain.User{
 		Username:   req.Username,
 		Password:   req.Password,
 		Role:       req.Role,
-		CustomerID: req.CustomerID,
-		CreatedOn:  time.Now().Format("2006-01-02 15:04:05"),
+		CustomerID: customerID,
+		CreatedOn:  time.Now(),
 	}
-
 
 	_, err := s.repo.SaveUser(user)
 	if err != nil {
@@ -76,29 +80,60 @@ func (s *AuthService) Register(req dto.RegisterRequest) (*dto.LoginResponse, *er
 		return nil, err
 	}
 
+	customerIDClaim := ""
+	if user.CustomerID != nil {
+		customerIDClaim = *user.CustomerID
+	}
 
 	claims := jwt.MapClaims{
 		"username":    user.Username,
 		"role":        user.Role,
-		"customer_id": user.CustomerID,
+		"customer_id": customerIDClaim,
 		"exp":         jwt.TimeFunc().Add(24 * time.Hour).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, signErr := token.SignedString(s.secretKey)
+	accessToken, signErr := token.SignedString(s.secretKey)
 	if signErr != nil {
 		logger.Error("Failed to generate JWT token for new user", logger.Any("error", signErr))
 		return nil, errs.NewUnexpectedError("Error generating token: " + signErr.Error())
 	}
 
-	return &dto.LoginResponse{Token: tokenString}, nil
+	refreshClaims := jwt.MapClaims{
+		"username": user.Username,
+		"exp":      jwt.TimeFunc().Add(7 * 24 * time.Hour).Unix(),
+	}
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshTokenString, signErr := refreshToken.SignedString(s.secretKey)
+	if signErr != nil {
+		logger.Error("Failed to generate refresh token for new user", logger.Any("error", signErr))
+		return nil, errs.NewUnexpectedError("Error generating refresh token: " + signErr.Error())
+	}
+
+	if err := s.repo.SaveRefreshToken(refreshTokenString); err != nil {
+		logger.Error("Failed to save refresh token", logger.Any("error", err))
+		return nil, err
+	}
+
+	return &dto.LoginResponse{
+		Token:        accessToken,
+		RefreshToken: refreshTokenString,
+	}, nil
 }
 
 func (s *AuthService) Refresh(token string) (*dto.LoginResponse, *errs.AppError) {
-
-	claims, err := utils.ExtractClaimsFromToken(token, s.GetSecretKey)
+	exists, err := s.repo.VerifyRefreshToken(token)
 	if err != nil {
-		logger.Error("Failed to parse refresh token", logger.Any("error", err))
+		return nil, err
+	}
+	if !exists {
+		logger.Warn("Refresh token not found in database")
+		return nil, errs.NewAuthenticationError("Invalid refresh token")
+	}
+
+	claims, tokenErr := utils.ExtractClaimsFromToken(token, func() []byte { return s.secretKey })
+	if tokenErr != nil {
+		logger.Error("Failed to parse refresh token", logger.Any("error", tokenErr))
 		return nil, errs.NewAuthenticationError("Invalid refresh token")
 	}
 
@@ -129,41 +164,34 @@ func (s *AuthService) Refresh(token string) (*dto.LoginResponse, *errs.AppError)
 }
 
 func (s *AuthService) RemoteIsAuthorized(token, routeName string, vars map[string]string) (bool, *errs.AppError) {
-	verifyURL := utils.BuildVerifyURL(token, routeName, vars)
-	logger.Debug("Verification URL", logger.String("url", verifyURL))
-
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(verifyURL)
-	if err != nil {
-		logger.Error("Error verifying token remotely", logger.Any("error", err))
-		return false, errs.NewUnexpectedError("Error verifying token")
+	claims, tokenErr := utils.ExtractClaimsFromToken(token, func() []byte { return s.secretKey })
+	if tokenErr != nil {
+		logger.Error("Failed to parse token", logger.Any("error", tokenErr))
+		return false, errs.NewAuthenticationError("Invalid token")
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		logger.Warn("Token verification failed", logger.Int("status", resp.StatusCode))
+	if exp, ok := claims["exp"].(float64); !ok || time.Unix(int64(exp), 0).Before(time.Now()) {
+		logger.Warn("Token expired")
+		return false, errs.NewAuthenticationError("Token expired")
+	}
+
+	role, ok := claims["role"].(string)
+	if !ok {
+		logger.Warn("Role not found in token")
+		return false, errs.NewAuthenticationError("Invalid token format")
+	}
+
+	customerID, _ := claims["customer_id"].(string)
+
+	isAuthorized := s.repo.VerifyPermission(role, customerID, routeName, vars)
+	if !isAuthorized {
+		logger.Warn("Permission denied",
+			logger.String("role", role),
+			logger.String("routeName", routeName))
 		return false, errs.NewAuthenticationError("Unauthorized")
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.Error("Error reading verification response", logger.Any("error", err))
-		return false, errs.NewUnexpectedError("Error reading response")
-	}
-
-	var response map[string]interface{}
-	if err := json.Unmarshal(body, &response); err != nil {
-		logger.Error("Error parsing verification response", logger.Any("error", err))
-		return false, errs.NewUnexpectedError("Error parsing response")
-	}
-
-	isAuthorized, ok := response["isAuthorized"].(bool)
-	if !ok {
-		logger.Error("Invalid verification response format", logger.Any("response", response))
-		return false, errs.NewUnexpectedError("Invalid response format")
-	}
-
-	return isAuthorized, nil
+	return true, nil
 }
 
 func (s *AuthService) GetSecretKey() []byte {

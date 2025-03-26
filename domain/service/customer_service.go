@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"github.com/titi0001/Microservices-API-in-Go/api/dto"
 	"github.com/titi0001/Microservices-API-in-Go/domain/ports"
 	"github.com/titi0001/Microservices-API-in-Go/errs"
@@ -36,18 +37,17 @@ func (s DefaultCustomerService) GetAllCustomer(status string) ([]dto.CustomerRes
 	return response, nil
 }
 
-
 func (s DefaultCustomerService) GetCustomer(id string) (*dto.CustomerResponse, *errs.AppError) {
 	c, err := s.repo.ByID(id)
 	if err != nil {
 		return nil, err
 	}
 	return &dto.CustomerResponse{
-		ID:          c.ID,
+		ID:          fmt.Sprintf("%d", c.ID),
 		Name:        c.Name,
 		City:        c.City,
 		Zipcode:     c.Zipcode,
 		DateOfBirth: c.DateOfBirth,
-		Status:      c.Status,
+		Status:      c.StatusAsText(),
 	}, nil
 }

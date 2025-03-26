@@ -9,16 +9,13 @@ import (
 	"github.com/titi0001/Microservices-API-in-Go/logger"
 )
 
-
 type CustomerRepositoryDb struct {
 	client *sqlx.DB
 }
 
-
 func NewCustomerRepositoryDb(dbClient *sqlx.DB) CustomerRepositoryDb {
 	return CustomerRepositoryDb{client: dbClient}
 }
-
 
 func (d CustomerRepositoryDb) FindAll(status string) ([]domain.Customer, *errs.AppError) {
 	var customers []domain.Customer
@@ -40,7 +37,6 @@ func (d CustomerRepositoryDb) FindAll(status string) ([]domain.Customer, *errs.A
 	return customers, nil
 }
 
-
 func (d CustomerRepositoryDb) ByID(id string) (*domain.Customer, *errs.AppError) {
 	customerSQL := "SELECT customer_id, name, date_of_birth, city, zipcode, status FROM customers WHERE customer_id = ?"
 	var c domain.Customer
@@ -56,8 +52,7 @@ func (d CustomerRepositoryDb) ByID(id string) (*domain.Customer, *errs.AppError)
 	return &c, nil
 }
 
-
-func (d *CustomerRepositoryDb) Close() {
+func (d CustomerRepositoryDb) Close() {
 	if d.client != nil {
 		if err := d.client.Close(); err != nil {
 			logger.Error("Error closing database connection", logger.Any("error", err))
