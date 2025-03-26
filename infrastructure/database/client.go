@@ -22,7 +22,7 @@ func GetClient() *sqlx.DB {
 			logger.String("variables", "MYSQL_USER, MYSQL_PASSWORD, or MYSQL_DATABASE"))
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", user, password, host, port, dbName)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true", user, password, host, port, dbName)
 
 	client, err := sqlx.Open("mysql", dsn)
 	if err != nil {
